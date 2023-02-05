@@ -1,0 +1,20 @@
+[package]
+name = "grep"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4.1.4", features = ["derive"] }
+colored = "2"
+glob = "0.3.1"
+itertools = "0.10.5"
+rayon = "1.6.1"
+regex = "1"
+thiserror = "1"
+tokio = { version = "1.20.0", features = ["full"] }
+tokio-util = { version = "0.7.3", features = ["codec"]}
+futures = "0.3"
+tokio-stream = "0.1.11"
