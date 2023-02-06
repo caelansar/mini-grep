@@ -6,7 +6,7 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use regex::Regex;
 use std::{
     fs::File,
-    io::{self, BufRead, BufReader, Write},
+    io::{self, BufRead, BufReader, BufWriter, Write},
     ops::Range,
     path::{Path, PathBuf},
     pin::Pin,
@@ -18,8 +18,6 @@ use tokio::{
 
 mod error;
 pub use error::GrepError;
-
-pub type StrategyFn = fn(&Path, &mut dyn BufRead, &Regex, &mut dyn Write) -> Result<(), GrepError>;
 
 /// mini grep
 #[derive(Parser, Debug)]
@@ -36,7 +34,13 @@ impl GrepConfig {
         self.grep_with(default_strategy)
     }
 
-    pub fn grep_with(&self, strategy: StrategyFn) -> Result<(), GrepError> {
+    pub fn grep_with<F>(&self, strategy: F) -> Result<(), GrepError>
+    where
+        F: FnOnce(&Path, &mut dyn BufRead, &Regex, &mut dyn Write) -> Result<(), GrepError>
+            + Send
+            + Sync
+            + Copy,
+    {
         let regex = Regex::new(&self.pattern)?;
         let files: Vec<_> = glob::glob(&self.glob)?.collect();
         files.into_par_iter().for_each(|v| {
@@ -123,10 +127,12 @@ pub fn default_strategy(
         .join("\n");
 
     if !matches.is_empty() {
-        writer.write_all(path.display().to_string().green().as_bytes())?;
-        writer.write_all(b"\n")?;
-        writer.write_all(matches.as_bytes())?;
-        writer.write_all(b"\n")?;
+        let mut buf_writer = BufWriter::new(writer);
+        buf_writer.write_all(path.display().to_string().green().as_bytes())?;
+        buf_writer.write_all(b"\n")?;
+        buf_writer.write_all(matches.as_bytes())?;
+        buf_writer.write_all(b"\n")?;
+        buf_writer.flush()?;
     }
 
     Ok(())
@@ -136,7 +142,7 @@ pub async fn default_async_strategy<'a>(
     path: PathBuf,
     reader: Pin<Box<dyn tokio::io::AsyncBufRead>>,
     pattern: Regex,
-    mut writer: Pin<Box<dyn tokio::io::AsyncWrite + 'a>>,
+    writer: Pin<Box<dyn tokio::io::AsyncWrite + 'a>>,
 ) -> Result<(), GrepError> {
     let mut lines = reader.lines();
     let mut lineno = 0;
@@ -151,12 +157,14 @@ pub async fn default_async_strategy<'a>(
     let matches = finds.join("\n");
 
     if !matches.is_empty() {
-        writer
+        let mut buf_writer = tokio::io::BufWriter::new(writer);
+        buf_writer
             .write_all(path.display().to_string().green().as_bytes())
             .await?;
-        writer.write_all(b"\n").await?;
-        writer.write_all(matches.as_bytes()).await?;
-        writer.write_all(b"\n").await?;
+        buf_writer.write_all(b"\n").await?;
+        buf_writer.write_all(matches.as_bytes()).await?;
+        buf_writer.write_all(b"\n").await?;
+        buf_writer.flush().await?;
     }
 
     Ok(())
